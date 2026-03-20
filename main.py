@@ -152,6 +152,41 @@ def get_attachment_bytes(service, msg_id, part):
         return base64.urlsafe_b64decode(data + "=" * missing)
     return None
 
+def extract_codes_from_docx(docx_bytes: bytes) -> list:
+    """Витягує всі коди з Word (.docx) документа."""
+    codes = []
+    try:
+        import docx, io
+        doc = docx.Document(io.BytesIO(docx_bytes))
+        text = "\n".join(p.text for p in doc.paragraphs)
+        # також перевіряємо таблиці
+        for table in doc.tables:
+            for row in table.rows:
+                for cell in row.cells:
+                    text += "\n" + cell.text
+        code = find_activation_code(text)
+        if code:
+            codes.append(code)
+    except Exception as e:
+        log.warning(f"DOCX помилка: {e}")
+    return codes
+
+def extract_codes_from_xlsx(xlsx_bytes: bytes) -> list:
+    """Витягує всі коди з Excel (.xlsx) файлу."""
+    codes = []
+    try:
+        import openpyxl, io
+        wb = openpyxl.load_workbook(io.BytesIO(xlsx_bytes), read_only=True, data_only=True)
+        for sheet in wb.worksheets:
+            for row in sheet.iter_rows(values_only=True):
+                text = " ".join(str(c) for c in row if c is not None)
+                code = find_activation_code(text)
+                if code and code not in codes:
+                    codes.append(code)
+    except Exception as e:
+        log.warning(f"XLSX помилка: {e}")
+    return codes
+
 def extract_codes_from_pdf(pdf_bytes: bytes) -> list:
     """Витягує ВСІ коди з PDF (текст + зображення)."""
     codes = []
@@ -206,6 +241,22 @@ def process_attachments(service, msg_id: str, payload: dict) -> list:
                 pdf_bytes = get_attachment_bytes(service, msg_id, part)
                 if pdf_bytes:
                     for code in extract_codes_from_pdf(pdf_bytes):
+                        if code not in codes:
+                            codes.append(code)
+            elif (mime in ("application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                           "application/msword") or
+                  filename.endswith((".docx", ".doc"))):
+                docx_bytes = get_attachment_bytes(service, msg_id, part)
+                if docx_bytes:
+                    for code in extract_codes_from_docx(docx_bytes):
+                        if code not in codes:
+                            codes.append(code)
+            elif (mime in ("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                           "application/vnd.ms-excel") or
+                  filename.endswith((".xlsx", ".xls"))):
+                xlsx_bytes = get_attachment_bytes(service, msg_id, part)
+                if xlsx_bytes:
+                    for code in extract_codes_from_xlsx(xlsx_bytes):
                         if code not in codes:
                             codes.append(code)
             sub = part.get("parts", [])
