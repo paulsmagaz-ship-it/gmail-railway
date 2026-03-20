@@ -1,5 +1,6 @@
 [phases.setup]
-nixPkgs = ["python311", "tesseract", "tesseract-lang"]
+nixPkgs = ["python311"]
+aptPkgs = ["tesseract-ocr", "tesseract-ocr-ukr", "tesseract-ocr-eng", "tesseract-ocr-rus"]
 
 [start]
 cmd = "python main.py"
