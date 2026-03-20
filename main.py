@@ -102,17 +102,76 @@ def find_activation_code(text: str):
 
 
 # ── OCR через pytesseract (Linux) ─────────────────────────────────────────────
-def ocr_image(image_path: str) -> str:
-    try:
-        import pytesseract
-        from PIL import Image, ImageOps, ImageFilter
-        img = Image.open(image_path).convert("L")
+def _preprocess(img, strategy: int):
+    """Різні стратегії обробки зображення."""
+    from PIL import ImageOps, ImageFilter, ImageEnhance
+    img = img.convert("L")  # grayscale
+
+    if strategy == 0:
+        # Базова: autocontrast + sharpen + 2x + fixed threshold
         img = ImageOps.autocontrast(img)
         img = img.filter(ImageFilter.SHARPEN)
         w, h = img.size
         img = img.resize((w * 2, h * 2))
         img = img.point(lambda p: 255 if p > 160 else 0)
-        return pytesseract.image_to_string(img, config="--oem 3 --psm 6 -c tessedit_char_whitelist=0123456789 ")
+
+    elif strategy == 1:
+        # Для туманних фото: сильне підвищення контрасту + 3x + адаптивний поріг
+        img = ImageOps.autocontrast(img, cutoff=2)
+        img = ImageEnhance.Contrast(img).enhance(3.0)
+        img = ImageEnhance.Sharpness(img).enhance(3.0)
+        w, h = img.size
+        img = img.resize((w * 3, h * 3))
+        # Otsu-подібний поріг: беремо середнє значення пікселів
+        import statistics
+        pixels = list(img.getdata())
+        threshold = statistics.median(pixels)
+        img = img.point(lambda p: 255 if p > threshold else 0)
+
+    elif strategy == 2:
+        # Для темних фото: інвертуємо + контраст + 3x
+        img = ImageOps.invert(img)
+        img = ImageOps.autocontrast(img, cutoff=5)
+        img = ImageEnhance.Contrast(img).enhance(2.0)
+        w, h = img.size
+        img = img.resize((w * 3, h * 3))
+        img = img.point(lambda p: 255 if p > 128 else 0)
+
+    elif strategy == 3:
+        # М'яка обробка без бінаризації: тільки збільшення і контраст
+        img = ImageOps.autocontrast(img, cutoff=1)
+        img = ImageEnhance.Sharpness(img).enhance(2.0)
+        w, h = img.size
+        img = img.resize((w * 3, h * 3))
+
+    return img
+
+def ocr_image(image_path: str) -> str:
+    """Пробує кілька стратегій обробки і повертає найкращий результат."""
+    try:
+        import pytesseract
+        from PIL import Image
+        base_img = Image.open(image_path)
+        cfg = "--oem 3 --psm 6 -c tessedit_char_whitelist=0123456789 "
+
+        best_text = ""
+        for strategy in range(4):
+            try:
+                processed = _preprocess(base_img.copy(), strategy)
+                text = pytesseract.image_to_string(processed, config=cfg)
+                # Вибираємо результат де найбільше цифр (корисніший для нас)
+                digits_count = sum(c.isdigit() for c in text)
+                best_digits = sum(c.isdigit() for c in best_text)
+                if digits_count > best_digits:
+                    best_text = text
+                # Якщо вже знайшли потенційний код — зупиняємось
+                if find_activation_code(text):
+                    log.info(f"  OCR: стратегія {strategy} знайшла код")
+                    return text
+            except Exception:
+                continue
+
+        return best_text
     except Exception as e:
         log.warning(f"OCR помилка: {e}")
         return ""
