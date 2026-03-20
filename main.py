@@ -301,15 +301,32 @@ def main():
         log.info(f"Перший запуск. Збережено {len(existing)} існуючих листів.")
         send_telegram("🚀 Gmail моніторинг запущено! Чекаю нових листів з кодами активації.")
 
+    last_error_notify = 0  # час останнього Telegram-повідомлення про помилку
+    ERROR_NOTIFY_INTERVAL = 1800  # не спамити частіше ніж раз на 30 хвилин
+
     while True:
         try:
             processed = check_once(service, processed)
+            last_error_notify = 0  # скидаємо лічильник якщо все ок
         except Exception as e:
             log.error(f"Помилка: {e}")
+
+            # Надсилаємо в Telegram не частіше ніж раз на 30 хвилин
+            now = time.time()
+            if now - last_error_notify > ERROR_NOTIFY_INTERVAL:
+                try:
+                    send_telegram(f"⚠️ *Gmail Monitor: помилка!*\n`{str(e)[:300]}`\n\nСпробую перепідключитись...")
+                    last_error_notify = now
+                except Exception:
+                    pass
+
+            # Спроба перепідключитись до Gmail
             try:
-                service = get_gmail_service()  # перепідключення
-            except Exception:
-                pass
+                service = get_gmail_service()
+                log.info("✅ Перепідключення до Gmail успішне")
+            except Exception as e2:
+                log.error(f"Перепідключення не вдалось: {e2}")
+
         time.sleep(CHECK_INTERVAL)
 
 if __name__ == "__main__":
