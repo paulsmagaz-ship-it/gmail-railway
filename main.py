@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Gmail Monitor for Railway — відстежує нові непрочитані листи,
-витягує 63-значний код активації MS Office і надсилає в Telegram.
+витягує ВСІ 63-значні коди активації MS Office і надсилає в Telegram.
 """
 import os, sys, re, json, base64, tempfile, time, warnings
 warnings.filterwarnings("ignore")
@@ -87,6 +87,7 @@ def normalize(text: str) -> str:
     return re.sub(r"\s+", " ", text).strip()
 
 def find_activation_code(text: str):
+    """Повертає перший знайдений код або None."""
     if not text:
         return None
     clean = normalize(text)
@@ -135,7 +136,7 @@ def get_body_text(payload: dict) -> str:
     return "".join(get_body_text(p) for p in payload.get("parts", []))
 
 
-# ── Обробка вкладень ──────────────────────────────────────────────────────────
+# ── Обробка вкладень — повертає СПИСОК всіх знайдених кодів ──────────────────
 def get_attachment_bytes(service, msg_id, part):
     body = part.get("body", {})
     inline = body.get("data")
@@ -151,14 +152,16 @@ def get_attachment_bytes(service, msg_id, part):
         return base64.urlsafe_b64decode(data + "=" * missing)
     return None
 
-def extract_from_pdf(pdf_bytes: bytes):
+def extract_codes_from_pdf(pdf_bytes: bytes) -> list:
+    """Витягує ВСІ коди з PDF (текст + зображення)."""
+    codes = []
     try:
         import fitz
         doc = fitz.open(stream=pdf_bytes, filetype="pdf")
         for page in doc:
             code = find_activation_code(page.get_text())
-            if code:
-                return code
+            if code and code not in codes:
+                codes.append(code)
             for img_info in page.get_images(full=True):
                 base_img = doc.extract_image(img_info[0])
                 with tempfile.NamedTemporaryFile(suffix=f".{base_img['ext']}", delete=False) as tmp:
@@ -166,15 +169,18 @@ def extract_from_pdf(pdf_bytes: bytes):
                     tmp_path = tmp.name
                 try:
                     code = find_activation_code(ocr_image(tmp_path))
-                    if code:
-                        return code
+                    if code and code not in codes:
+                        codes.append(code)
                 finally:
                     os.unlink(tmp_path)
     except Exception as e:
         log.warning(f"PDF помилка: {e}")
-    return None
+    return codes
 
-def process_attachments(service, msg_id: str, payload: dict):
+def process_attachments(service, msg_id: str, payload: dict) -> list:
+    """Обходить всі вкладення і повертає СПИСОК всіх знайдених кодів."""
+    codes = []
+
     def _walk(parts):
         for part in parts:
             mime     = part.get("mimeType", "")
@@ -192,23 +198,22 @@ def process_attachments(service, msg_id: str, payload: dict):
                         tmp_path = tmp.name
                     try:
                         code = find_activation_code(ocr_image(tmp_path))
-                        if code:
-                            return code
+                        if code and code not in codes:
+                            codes.append(code)
                     finally:
                         os.unlink(tmp_path)
             elif mime == "application/pdf" or filename.endswith(".pdf"):
                 pdf_bytes = get_attachment_bytes(service, msg_id, part)
                 if pdf_bytes:
-                    code = extract_from_pdf(pdf_bytes)
-                    if code:
-                        return code
+                    for code in extract_codes_from_pdf(pdf_bytes):
+                        if code not in codes:
+                            codes.append(code)
             sub = part.get("parts", [])
             if sub:
-                result = _walk(sub)
-                if result:
-                    return result
-        return None
-    return _walk(payload.get("parts", []))
+                _walk(sub)
+
+    _walk(payload.get("parts", []))
+    return codes
 
 
 # ── Telegram ───────────────────────────────────────────────────────────────────
@@ -218,14 +223,17 @@ def send_telegram(text: str):
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
     req.post(url, data={"chat_id": TELEGRAM_CHAT_ID, "text": text, "parse_mode": "Markdown"}, timeout=20)
 
-def notify(sender_email: str, subject: str, code: str):
-    msg = (
-        f"📧 *Від:* `{sender_email}`\n"
-        f"📌 *Тема:* {subject or '—'}\n\n"
-        f"🔑 *Код активації:*\n`{code}`"
-    )
-    send_telegram(msg)
-    log.info(f"✅ Відправлено: {code}")
+def notify(sender_email: str, subject: str, codes: list):
+    """Надсилає всі знайдені коди — кожен окремим повідомленням."""
+    for i, code in enumerate(codes, 1):
+        num = f" #{i}" if len(codes) > 1 else ""
+        msg = (
+            f"📧 *Від:* `{sender_email}`\n"
+            f"📌 *Тема:* {subject or '—'}\n\n"
+            f"🔑 *Код активації{num}:*\n`{code}`"
+        )
+        send_telegram(msg)
+        log.info(f"✅ Відправлено код{num}: {code}")
 
 
 # ── Одна перевірка ────────────────────────────────────────────────────────────
@@ -255,14 +263,21 @@ def check_once(service, processed: set) -> set:
 
         log.info(f"→ {sender_email} | {subject}")
 
-        code = find_activation_code(get_body_text(msg["payload"]))
-        if not code:
-            code = process_attachments(service, msg_id, msg["payload"])
+        # Збираємо всі коди: спочатку з тіла, потім з вкладень
+        codes = []
+        body_code = find_activation_code(get_body_text(msg["payload"]))
+        if body_code:
+            codes.append(body_code)
+
+        for code in process_attachments(service, msg_id, msg["payload"]):
+            if code not in codes:
+                codes.append(code)
 
         processed.add(msg_id)
 
-        if code:
-            notify(sender_email, subject, code)
+        if codes:
+            log.info(f"  ↳ Знайдено кодів: {len(codes)}")
+            notify(sender_email, subject, codes)
         else:
             log.info(f"  ↳ Код не знайдено — ігнорується")
 
