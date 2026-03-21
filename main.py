@@ -101,80 +101,97 @@ def find_activation_code(text: str):
     return None
 
 
-# ── OCR через pytesseract (Linux) ─────────────────────────────────────────────
-def _preprocess(img, strategy: int):
-    """Різні стратегії обробки зображення."""
-    from PIL import ImageOps, ImageFilter, ImageEnhance
-    img = img.convert("L")  # grayscale
+# ── OCR через Google Vision API (основний) + pytesseract (запасний) ───────────
+VISION_API_KEY = os.environ.get("GOOGLE_VISION_API_KEY", "")
 
+def ocr_via_google_vision(image_path: str) -> str:
+    """OCR через Google Cloud Vision API — найточніший варіант."""
+    if not VISION_API_KEY:
+        return ""
+    try:
+        with open(image_path, "rb") as f:
+            img_bytes = f.read()
+        img_b64 = base64.b64encode(img_bytes).decode("utf-8")
+        url = f"https://vision.googleapis.com/v1/images:annotate?key={VISION_API_KEY}"
+        payload = {"requests": [{"image": {"content": img_b64},
+                                 "features": [{"type": "TEXT_DETECTION"}]}]}
+        resp = req.post(url, json=payload, timeout=30)
+        resp.raise_for_status()
+        annotations = resp.json().get("responses", [{}])[0].get("textAnnotations", [])
+        if annotations:
+            text = annotations[0].get("description", "")
+            log.info("  OCR: Google Vision API успішно")
+            return text
+    except Exception as e:
+        log.warning(f"Google Vision API помилка: {e}")
+    return ""
+
+def _preprocess(img, strategy: int):
+    """Різні стратегії обробки зображення для pytesseract."""
+    from PIL import ImageOps, ImageFilter, ImageEnhance
+    img = img.convert("L")
     if strategy == 0:
-        # Базова: autocontrast + sharpen + 2x + fixed threshold
         img = ImageOps.autocontrast(img)
         img = img.filter(ImageFilter.SHARPEN)
         w, h = img.size
         img = img.resize((w * 2, h * 2))
         img = img.point(lambda p: 255 if p > 160 else 0)
-
     elif strategy == 1:
-        # Для туманних фото: сильне підвищення контрасту + 3x + адаптивний поріг
         img = ImageOps.autocontrast(img, cutoff=2)
         img = ImageEnhance.Contrast(img).enhance(3.0)
         img = ImageEnhance.Sharpness(img).enhance(3.0)
         w, h = img.size
         img = img.resize((w * 3, h * 3))
-        # Otsu-подібний поріг: беремо середнє значення пікселів
         import statistics
-        pixels = list(img.getdata())
-        threshold = statistics.median(pixels)
+        threshold = statistics.median(list(img.getdata()))
         img = img.point(lambda p: 255 if p > threshold else 0)
-
     elif strategy == 2:
-        # Для темних фото: інвертуємо + контраст + 3x
         img = ImageOps.invert(img)
         img = ImageOps.autocontrast(img, cutoff=5)
         img = ImageEnhance.Contrast(img).enhance(2.0)
         w, h = img.size
         img = img.resize((w * 3, h * 3))
         img = img.point(lambda p: 255 if p > 128 else 0)
-
     elif strategy == 3:
-        # М'яка обробка без бінаризації: тільки збільшення і контраст
         img = ImageOps.autocontrast(img, cutoff=1)
         img = ImageEnhance.Sharpness(img).enhance(2.0)
         w, h = img.size
         img = img.resize((w * 3, h * 3))
-
     return img
 
-def ocr_image(image_path: str) -> str:
-    """Пробує кілька стратегій обробки і повертає найкращий результат."""
+def ocr_via_tesseract(image_path: str) -> str:
+    """Запасний OCR через pytesseract з кількома стратегіями обробки."""
     try:
         import pytesseract
         from PIL import Image
         base_img = Image.open(image_path)
         cfg = "--oem 3 --psm 6 -c tessedit_char_whitelist=0123456789 "
-
         best_text = ""
         for strategy in range(4):
             try:
                 processed = _preprocess(base_img.copy(), strategy)
                 text = pytesseract.image_to_string(processed, config=cfg)
-                # Вибираємо результат де найбільше цифр (корисніший для нас)
-                digits_count = sum(c.isdigit() for c in text)
-                best_digits = sum(c.isdigit() for c in best_text)
-                if digits_count > best_digits:
-                    best_text = text
-                # Якщо вже знайшли потенційний код — зупиняємось
                 if find_activation_code(text):
-                    log.info(f"  OCR: стратегія {strategy} знайшла код")
+                    log.info(f"  OCR: tesseract стратегія {strategy} знайшла код")
                     return text
+                if sum(c.isdigit() for c in text) > sum(c.isdigit() for c in best_text):
+                    best_text = text
             except Exception:
                 continue
-
         return best_text
     except Exception as e:
-        log.warning(f"OCR помилка: {e}")
+        log.warning(f"Tesseract OCR помилка: {e}")
         return ""
+
+def ocr_image(image_path: str) -> str:
+    """Спочатку Google Vision API, при невдачі — pytesseract."""
+    # Спробуємо Google Vision API
+    text = ocr_via_google_vision(image_path)
+    if text:
+        return text
+    # Запасний варіант — pytesseract
+    log.info("  OCR: fallback на pytesseract")
+    return ocr_via_tesseract(image_path)
 
 
 # ── Декодування тіла листа ────────────────────────────────────────────────────
