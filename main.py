@@ -350,12 +350,14 @@ def send_telegram(text: str):
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
     req.post(url, data={"chat_id": TELEGRAM_CHAT_ID, "text": text, "parse_mode": "Markdown"}, timeout=20)
 
-def notify(sender_email: str, subject: str, codes: list):
+def notify(sender_email: str, subject: str, codes: list, msg_id: str = ""):
     """Надсилає всі знайдені коди — кожен окремим повідомленням."""
+    gmail_url = f"https://mail.google.com/mail/u/0/#inbox/{msg_id}" if msg_id else ""
+    email_link = f"[{sender_email}]({gmail_url})" if gmail_url else f"`{sender_email}`"
     for i, code in enumerate(codes, 1):
         num = f" #{i}" if len(codes) > 1 else ""
         msg = (
-            f"📧 *Від:* `{sender_email}`\n"
+            f"📧 *Від:* {email_link}\n"
             f"📌 *Тема:* {subject or '—'}\n\n"
             f"🔑 *Код активації{num}:*\n`{code}`"
         )
@@ -404,7 +406,7 @@ def check_once(service, processed: set) -> set:
 
         if codes:
             log.info(f"  ↳ Знайдено кодів: {len(codes)}")
-            notify(sender_email, subject, codes)
+            notify(sender_email, subject, codes, msg_id)
         else:
             log.info(f"  ↳ Код не знайдено — ігнорується")
 
