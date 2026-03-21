@@ -211,6 +211,41 @@ def get_body_text(payload: dict) -> str:
         return decode_b64(data)
     return "".join(get_body_text(p) for p in payload.get("parts", []))
 
+def get_plain_body(payload: dict) -> str:
+    """Повертає чистий текст листа (без HTML тегів і зайвих пробілів)."""
+    # Спочатку шукаємо text/plain
+    def _find(parts, target_mime):
+        for part in parts:
+            if part.get("mimeType") == target_mime:
+                data = part.get("body", {}).get("data", "")
+                if data:
+                    return decode_b64(data)
+            sub = part.get("parts", [])
+            if sub:
+                result = _find(sub, target_mime)
+                if result:
+                    return result
+        return ""
+
+    text = _find(payload.get("parts", [payload]), "text/plain")
+    if not text:
+        html = _find(payload.get("parts", [payload]), "text/html")
+        if html:
+            # Прибираємо HTML теги
+            text = re.sub(r"<[^>]+>", " ", html)
+
+    # Чистимо текст
+    text = re.sub(r"\r\n|\r", "\n", text)
+    text = re.sub(r"\n{3,}", "\n\n", text)
+    text = re.sub(r"[ \t]+", " ", text)
+    text = text.strip()
+
+    # Обрізаємо якщо дуже довгий (Telegram обмеження 4096 символів)
+    if len(text) > 600:
+        text = text[:600].rsplit("\n", 1)[0] + "\n..."
+
+    return text
+
 
 # ── Обробка вкладень — повертає СПИСОК всіх знайдених кодів ──────────────────
 def get_attachment_bytes(service, msg_id, part):
@@ -350,15 +385,17 @@ def send_telegram(text: str):
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
     req.post(url, data={"chat_id": TELEGRAM_CHAT_ID, "text": text, "parse_mode": "Markdown"}, timeout=20)
 
-def notify(sender_email: str, subject: str, codes: list, msg_id: str = ""):
+def notify(sender_email: str, subject: str, codes: list, msg_id: str = "", body_text: str = ""):
     """Надсилає всі знайдені коди — кожен окремим повідомленням."""
     gmail_url = f"https://mail.google.com/mail/u/0/#inbox/{msg_id}" if msg_id else ""
     email_link = f"[{sender_email}]({gmail_url})" if gmail_url else f"`{sender_email}`"
+    body_section = f"\n💬 *Повідомлення:*\n{body_text}\n" if body_text else ""
     for i, code in enumerate(codes, 1):
         num = f" #{i}" if len(codes) > 1 else ""
         msg = (
             f"📧 *Від:* {email_link}\n"
-            f"📌 *Тема:* {subject or '—'}\n\n"
+            f"📌 *Тема:* {subject or '—'}\n"
+            f"{body_section}\n"
             f"🔑 *Код активації{num}:*\n`{code}`"
         )
         send_telegram(msg)
@@ -392,6 +429,9 @@ def check_once(service, processed: set) -> set:
 
         log.info(f"→ {sender_email} | {subject}")
 
+        # Отримуємо текст листа для відображення
+        body_text = get_plain_body(msg["payload"])
+
         # Збираємо всі коди: спочатку з тіла, потім з вкладень
         codes = []
         body_code = find_activation_code(get_body_text(msg["payload"]))
@@ -406,7 +446,7 @@ def check_once(service, processed: set) -> set:
 
         if codes:
             log.info(f"  ↳ Знайдено кодів: {len(codes)}")
-            notify(sender_email, subject, codes, msg_id)
+            notify(sender_email, subject, codes, msg_id, body_text)
         else:
             log.info(f"  ↳ Код не знайдено — ігнорується")
 
