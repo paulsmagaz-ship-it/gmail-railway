@@ -103,6 +103,7 @@ def find_activation_code(text: str):
 
 # ── OCR через Google Vision API (основний) + pytesseract (запасний) ───────────
 VISION_API_KEY = os.environ.get("GOOGLE_VISION_API_KEY", "")
+GETCID_TOKEN   = os.environ.get("GETCID_TOKEN", "")
 
 def ocr_via_google_vision(image_path: str) -> str:
     """OCR через Google Cloud Vision API — найточніший варіант."""
@@ -378,6 +379,23 @@ def process_attachments(service, msg_id: str, payload: dict) -> list:
     return codes
 
 
+# ── Getsid API ────────────────────────────────────────────────────────────────
+def get_confirmation(activation_code: str) -> str:
+    """Відправляє код в Getsid і повертає код підтвердження або повідомлення про помилку."""
+    if not GETCID_TOKEN:
+        return ""
+    try:
+        iid = activation_code.replace(" ", "")
+        url = f"https://getcid.info/api/{iid}/{GETCID_TOKEN}"
+        resp = req.get(url, timeout=30)
+        result = resp.text.strip()
+        log.info(f"  Getsid відповідь: {result}")
+        return result
+    except Exception as e:
+        log.warning(f"Getsid API помилка: {e}")
+        return ""
+
+
 # ── Telegram ───────────────────────────────────────────────────────────────────
 import requests as req
 
@@ -392,11 +410,22 @@ def notify(sender_email: str, subject: str, codes: list, msg_id: str = "", body_
     body_section = f"\n💬 *Повідомлення:*\n{body_text}\n" if body_text else ""
     for i, code in enumerate(codes, 1):
         num = f" #{i}" if len(codes) > 1 else ""
+
+        # Отримуємо підтвердження з Getsid
+        confirmation = get_confirmation(code)
+        if confirmation and not any(err in confirmation for err in ["Wrong", "Blocked", "Exceeded", "limit", "empty", "error"]):
+            confirm_section = f"\n✅ *Код підтвердження{num}:*\n`{confirmation}`"
+        elif confirmation:
+            confirm_section = f"\n⚠️ *Getsid:* {confirmation}"
+        else:
+            confirm_section = ""
+
         msg = (
             f"📧 *Від:* {email_link}\n"
             f"📌 *Тема:* {subject or '—'}\n"
             f"{body_section}\n"
             f"🔑 *Код активації{num}:*\n`{code}`"
+            f"{confirm_section}"
         )
         send_telegram(msg)
         log.info(f"✅ Відправлено код{num}: {code}")
