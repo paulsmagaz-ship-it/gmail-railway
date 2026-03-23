@@ -395,6 +395,13 @@ def get_confirmation(activation_code: str) -> str:
         log.warning(f"Getsid API помилка: {e}")
         return ""
 
+def format_confirmation(code: str) -> str:
+    """Форматує код підтвердження як 8 груп по 6 цифр."""
+    digits = re.sub(r"\D", "", code)
+    if len(digits) == 48:
+        return " ".join(digits[i:i+6] for i in range(0, 48, 6))
+    return code  # повертаємо як є якщо кількість цифр не 48
+
 
 # ── Telegram ───────────────────────────────────────────────────────────────────
 import requests as req
@@ -414,7 +421,7 @@ def notify(sender_email: str, subject: str, codes: list, msg_id: str = "", body_
         # Отримуємо підтвердження з Getsid
         confirmation = get_confirmation(code)
         if confirmation and not any(err in confirmation for err in ["Wrong", "Blocked", "Exceeded", "limit", "empty", "error"]):
-            confirm_section = f"\n✅ *Код підтвердження{num}:*\n`{confirmation}`"
+            confirm_section = f"\n✅ *Код підтвердження{num}:*\n`{format_confirmation(confirmation)}`"
         elif confirmation:
             confirm_section = f"\n⚠️ *Getsid:* {confirmation}"
         else:
