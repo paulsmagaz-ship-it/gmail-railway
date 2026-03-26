@@ -441,7 +441,7 @@ def notify(sender_email: str, subject: str, codes: list, msg_id: str = "", body_
 # ── Одна перевірка ────────────────────────────────────────────────────────────
 def check_once(service, processed: set) -> set:
     result = service.users().messages().list(
-        userId="me", q="is:unread", maxResults=50).execute()
+        userId="me", q="newer_than:1d", maxResults=50).execute()
     messages = result.get("messages", [])
     if not messages:
         return processed
@@ -499,7 +499,7 @@ def main():
     # Перший запуск — зберігаємо всі поточні unread IDs без обробки
     if not os.path.exists(PROCESSED_FILE):
         result = service.users().messages().list(
-            userId="me", q="is:unread", maxResults=500).execute()
+            userId="me", q="newer_than:1d", maxResults=500).execute()
         existing = {m["id"] for m in result.get("messages", [])}
         save_processed(existing)
         processed = existing
