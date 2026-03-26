@@ -496,15 +496,7 @@ def main():
     service   = get_gmail_service()
     processed = load_processed()
 
-    # Перший запуск — зберігаємо всі поточні unread IDs без обробки
-    if not os.path.exists(PROCESSED_FILE):
-        result = service.users().messages().list(
-            userId="me", q="newer_than:1d", maxResults=500).execute()
-        existing = {m["id"] for m in result.get("messages", [])}
-        save_processed(existing)
-        processed = existing
-        log.info(f"Перший запуск. Збережено {len(existing)} існуючих листів.")
-        send_telegram("🚀 Gmail моніторинг запущено! Чекаю нових листів з кодами активації.")
+    send_telegram("🚀 Gmail моніторинг запущено! Чекаю нових листів з кодами активації.")
 
     last_error_notify = 0  # час останнього Telegram-повідомлення про помилку
     ERROR_NOTIFY_INTERVAL = 1800  # не спамити частіше ніж раз на 30 хвилин
