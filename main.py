@@ -511,6 +511,7 @@ def main():
 
     while True:
         try:
+            log.info("🔄 Перевіряю листи...")
             processed = check_once(service, processed)
             last_error_notify = 0  # скидаємо лічильник якщо все ок
         except Exception as e:
