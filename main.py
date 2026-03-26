@@ -17,7 +17,7 @@ log = logging.getLogger(__name__)
 # ── Конфіг з env vars ──────────────────────────────────────────────────────────
 TELEGRAM_TOKEN   = os.environ["TELEGRAM_TOKEN"]
 TELEGRAM_CHAT_ID = os.environ["TELEGRAM_CHAT_ID"]
-CHECK_INTERVAL   = int(os.environ.get("CHECK_INTERVAL", "30"))
+CHECK_INTERVAL   = int(os.environ.get("CHECK_INTERVAL", "5"))
 
 # Credentials зберігаємо як файли (з env vars)
 DATA_DIR         = os.environ.get("DATA_DIR", "/data")
