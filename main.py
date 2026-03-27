@@ -102,8 +102,9 @@ def find_activation_code(text: str):
 
 
 # ── OCR через Google Vision API (основний) + pytesseract (запасний) ───────────
-VISION_API_KEY = os.environ.get("GOOGLE_VISION_API_KEY", "")
-GETCID_TOKEN   = os.environ.get("GETCID_TOKEN", "")
+VISION_API_KEY  = os.environ.get("GOOGLE_VISION_API_KEY", "")
+GETCID_TOKEN    = os.environ.get("GETCID_TOKEN", "")
+GETCID_TOKEN_2  = os.environ.get("GETCID_TOKEN_2", "")
 
 def ocr_via_google_vision(image_path: str) -> str:
     """OCR через Google Cloud Vision API — найточніший варіант."""
@@ -381,19 +382,25 @@ def process_attachments(service, msg_id: str, payload: dict) -> list:
 
 # ── Getsid API ────────────────────────────────────────────────────────────────
 def get_confirmation(activation_code: str) -> str:
-    """Відправляє код в Getsid і повертає код підтвердження або повідомлення про помилку."""
+    """Відправляє код в Getsid. Якщо перший токен вичерпано — автоматично пробує другий."""
     if not GETCID_TOKEN:
         return ""
-    try:
-        iid = activation_code.replace(" ", "")
-        url = f"https://getcid.info/api/{iid}/{GETCID_TOKEN}"
-        resp = req.get(url, timeout=30)
-        result = resp.text.strip()
-        log.info(f"  Getsid відповідь: {result}")
-        return result
-    except Exception as e:
-        log.warning(f"Getsid API помилка: {e}")
-        return ""
+    iid = activation_code.replace(" ", "")
+    tokens = [t for t in [GETCID_TOKEN, GETCID_TOKEN_2] if t]
+    for i, token in enumerate(tokens, 1):
+        try:
+            url = f"https://getcid.info/api/{iid}/{token}"
+            resp = req.get(url, timeout=30)
+            result = resp.text.strip()
+            log.info(f"  Getsid токен {i} відповідь: {result}")
+            # Якщо токен вичерпано — пробуємо наступний
+            if any(err in result for err in ["Exceeded", "limit", "Token"]) and i < len(tokens):
+                log.warning(f"  Getsid токен {i} вичерпано, пробую токен {i+1}...")
+                continue
+            return result
+        except Exception as e:
+            log.warning(f"Getsid API токен {i} помилка: {e}")
+    return ""
 
 def format_confirmation(code: str) -> str:
     """Форматує код підтвердження як 8 груп по 6 цифр."""
