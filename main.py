@@ -448,7 +448,7 @@ def notify(sender_email: str, subject: str, codes: list, msg_id: str = "", body_
 # ── Одна перевірка ────────────────────────────────────────────────────────────
 def check_once(service, processed: set) -> set:
     result = service.users().messages().list(
-        userId="me", q="newer_than:1d", maxResults=50).execute()
+        userId="me", q="in:inbox newer_than:1d", maxResults=50).execute()
     messages = result.get("messages", [])
     if not messages:
         return processed
