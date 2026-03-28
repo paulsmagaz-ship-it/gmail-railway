@@ -421,7 +421,6 @@ def notify(sender_email: str, subject: str, codes: list, msg_id: str = "", body_
     """Надсилає всі знайдені коди — кожен окремим повідомленням."""
     gmail_url = f"https://mail.google.com/mail/u/0/#inbox/{msg_id}" if msg_id else ""
     email_link = f"[{sender_email}]({gmail_url})" if gmail_url else f"`{sender_email}`"
-    body_section = f"\n💬 *Повідомлення:*\n{body_text}\n" if body_text else ""
     for i, code in enumerate(codes, 1):
         num = f" #{i}" if len(codes) > 1 else ""
 
@@ -436,8 +435,6 @@ def notify(sender_email: str, subject: str, codes: list, msg_id: str = "", body_
 
         msg = (
             f"📧 *Від:* {email_link}\n"
-            f"📌 *Тема:* {subject or '—'}\n"
-            f"{body_section}\n"
             f"🔑 *Код активації{num}:*\n`{code}`"
             f"{confirm_section}"
         )
