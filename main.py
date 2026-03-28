@@ -24,6 +24,7 @@ DATA_DIR         = os.environ.get("DATA_DIR", "/data")
 CREDENTIALS_FILE = os.path.join(DATA_DIR, "credentials.json")
 TOKEN_FILE       = os.path.join(DATA_DIR, "gmail_token.json")
 PROCESSED_FILE   = os.path.join(DATA_DIR, "processed_ids.json")
+LAST_CHECK_FILE  = os.path.join(DATA_DIR, "last_check_time.txt")
 
 os.makedirs(DATA_DIR, exist_ok=True)
 
@@ -444,9 +445,24 @@ def notify(sender_email: str, subject: str, codes: list, msg_id: str = "", body_
 
 # ── Одна перевірка ────────────────────────────────────────────────────────────
 def check_once(service, processed: set) -> set:
+    now = int(time.time())
+
+    if os.path.exists(LAST_CHECK_FILE):
+        with open(LAST_CHECK_FILE) as f:
+            since = int(f.read().strip()) - 60  # 1 хв буфер щоб не пропустити
+        q = f"in:inbox after:{since}"
+    else:
+        # Перший запуск — обробляємо тільки останні 3 хвилини
+        q = f"in:inbox after:{now - 180}"
+
     result = service.users().messages().list(
-        userId="me", q="in:inbox newer_than:1d", maxResults=50).execute()
+        userId="me", q=q, maxResults=50).execute()
     messages = result.get("messages", [])
+
+    # Зберігаємо час ДО обробки щоб не пропустити листи що прийшли під час роботи
+    with open(LAST_CHECK_FILE, "w") as f:
+        f.write(str(now))
+
     if not messages:
         return processed
 
