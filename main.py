@@ -39,15 +39,14 @@ if not os.path.exists(CREDENTIALS_FILE):
         log.error("❌ GOOGLE_CREDENTIALS_JSON не встановлено!")
         sys.exit(1)
 
-if not os.path.exists(TOKEN_FILE):
-    token_json = os.environ.get("GOOGLE_TOKEN_JSON", "")
-    if token_json:
-        with open(TOKEN_FILE, "w") as f:
-            f.write(token_json)
-        log.info("✅ gmail_token.json записано з env var")
-    else:
-        log.error("❌ GOOGLE_TOKEN_JSON не встановлено!")
-        sys.exit(1)
+token_json = os.environ.get("GOOGLE_TOKEN_JSON", "")
+if token_json:
+    with open(TOKEN_FILE, "w") as f:
+        f.write(token_json)
+    log.info("✅ gmail_token.json записано з env var")
+else:
+    log.error("❌ GOOGLE_TOKEN_JSON не встановлено!")
+    sys.exit(1)
 
 # ── Gmail API ──────────────────────────────────────────────────────────────────
 from google.auth.transport.requests import Request
