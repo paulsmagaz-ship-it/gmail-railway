@@ -20,11 +20,12 @@ TELEGRAM_CHAT_ID = os.environ["TELEGRAM_CHAT_ID"]
 CHECK_INTERVAL   = int(os.environ.get("CHECK_INTERVAL", "5"))
 
 # Credentials зберігаємо як файли (з env vars)
-DATA_DIR         = os.environ.get("DATA_DIR", "/data")
-CREDENTIALS_FILE = os.path.join(DATA_DIR, "credentials.json")
-TOKEN_FILE       = os.path.join(DATA_DIR, "gmail_token.json")
-PROCESSED_FILE   = os.path.join(DATA_DIR, "processed_ids.json")
-LAST_CHECK_FILE  = os.path.join(DATA_DIR, "last_check_time.txt")
+DATA_DIR          = os.environ.get("DATA_DIR", "/data")
+CREDENTIALS_FILE  = os.path.join(DATA_DIR, "credentials.json")
+TOKEN_FILE        = os.path.join(DATA_DIR, "gmail_token.json")
+PROCESSED_FILE    = os.path.join(DATA_DIR, "processed_ids.json")
+LAST_CHECK_FILE   = os.path.join(DATA_DIR, "last_check_time.txt")
+GETCID_COUNT_FILE = os.path.join(DATA_DIR, "getcid_token_count.json")
 
 os.makedirs(DATA_DIR, exist_ok=True)
 
@@ -381,6 +382,47 @@ def process_attachments(service, msg_id: str, payload: dict) -> list:
 
 
 # ── Getsid API ────────────────────────────────────────────────────────────────
+GETCID_LOW_THRESHOLD = 10  # попередження при N залишкових активаціях
+
+def _load_getcid_counts() -> dict:
+    """Завантажує лічильники використань токенів."""
+    try:
+        if os.path.exists(GETCID_COUNT_FILE):
+            with open(GETCID_COUNT_FILE) as f:
+                return json.load(f)
+    except Exception:
+        pass
+    return {}
+
+def _save_getcid_counts(counts: dict):
+    try:
+        with open(GETCID_COUNT_FILE, "w") as f:
+            json.dump(counts, f)
+    except Exception:
+        pass
+
+def _increment_getcid_count(token: str, token_idx: int):
+    """Збільшує лічильник і надсилає попередження якщо залишилось мало активацій."""
+    counts = _load_getcid_counts()
+    key = token[:8]  # перші 8 символів як ідентифікатор
+    counts[key] = counts.get(key, 0) + 1
+    used = counts[key]
+    _save_getcid_counts(counts)
+    log.info(f"  Getsid токен {token_idx} використано разів: {used}")
+
+    # Перевіряємо ліміт токена з env var (за замовчуванням 100)
+    limit = int(os.environ.get("GETCID_TOKEN_LIMIT", "100"))
+    remaining = limit - used
+    if remaining == GETCID_LOW_THRESHOLD:
+        try:
+            send_telegram(
+                f"⚠️ *Getsid токен {token_idx}* закінчується\\!\n"
+                f"Залишилось *{remaining}* активацій з {limit}\\.\n"
+                f"Надішли новий токен\\."
+            )
+        except Exception as e:
+            log.warning(f"Не вдалось надіслати попередження про токен: {e}")
+
 def get_confirmation(activation_code: str) -> str:
     """Відправляє код в Getsid. Якщо перший токен вичерпано — автоматично пробує другий."""
     if not GETCID_TOKEN:
@@ -397,6 +439,9 @@ def get_confirmation(activation_code: str) -> str:
             if any(err in result for err in ["Exceeded", "limit", "Token"]) and i < len(tokens):
                 log.warning(f"  Getsid токен {i} вичерпано, пробую токен {i+1}...")
                 continue
+            # Успішна відповідь — рахуємо використання
+            if not any(err in result for err in ["Wrong", "Blocked", "Exceeded", "limit", "empty", "error", "Token"]):
+                _increment_getcid_count(token, i)
             return result
         except Exception as e:
             log.warning(f"Getsid API токен {i} помилка: {e}")
