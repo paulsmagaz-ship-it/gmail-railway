@@ -382,8 +382,6 @@ def process_attachments(service, msg_id: str, payload: dict) -> list:
 
 
 # ── Getsid API ────────────────────────────────────────────────────────────────
-GETCID_LOW_THRESHOLD = 10  # попередження при N залишкових активаціях
-
 def _load_getcid_counts() -> dict:
     """Завантажує лічильники використань токенів."""
     try:
@@ -410,19 +408,6 @@ def _increment_getcid_count(token: str, token_idx: int):
     _save_getcid_counts(counts)
     log.info(f"  Getsid токен {token_idx} використано разів: {used}")
 
-    # Перевіряємо ліміт токена з env var (за замовчуванням 100)
-    limit = int(os.environ.get("GETCID_TOKEN_LIMIT", "100"))
-    remaining = limit - used
-    if remaining == GETCID_LOW_THRESHOLD:
-        try:
-            send_telegram(
-                f"⚠️ *Getsid токен {token_idx}* закінчується\\!\n"
-                f"Залишилось *{remaining}* активацій з {limit}\\.\n"
-                f"Надішли новий токен\\."
-            )
-        except Exception as e:
-            log.warning(f"Не вдалось надіслати попередження про токен: {e}")
-
 def get_confirmation(activation_code: str) -> str:
     """Відправляє код в Getsid. Якщо перший токен вичерпано — автоматично пробує другий."""
     if not GETCID_TOKEN:
@@ -438,6 +423,13 @@ def get_confirmation(activation_code: str) -> str:
             # Якщо токен вичерпано — пробуємо наступний
             if any(err in result for err in ["Exceeded", "limit", "Token"]) and i < len(tokens):
                 log.warning(f"  Getsid токен {i} вичерпано, пробую токен {i+1}...")
+                try:
+                    send_telegram(
+                        f"🔄 *Getsid токен {i}* вичерпано — автоматично переключилось на токен {i+1}\\.\n"
+                        f"Додай новий токен у чергу\\."
+                    )
+                except Exception:
+                    pass
                 continue
             # Успішна відповідь — рахуємо використання
             if not any(err in result for err in ["Wrong", "Blocked", "Exceeded", "limit", "empty", "error", "Token"]):
