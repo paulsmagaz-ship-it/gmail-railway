@@ -417,7 +417,13 @@ def get_confirmation(activation_code: str) -> str:
     for i, token in enumerate(tokens, 1):
         try:
             url = f"https://getcid.info/api/{iid}/{token}"
-            resp = req.get(url, timeout=30)
+            headers = {
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36",
+                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+                "Accept-Language": "en-US,en;q=0.5",
+                "Referer": "https://getcid.info/",
+            }
+            resp = req.get(url, headers=headers, timeout=30)
             result = resp.text.strip()
             # Cloudflare challenge — логуємо скорочено
             if result.startswith("<!") or "Just a moment" in result or "challenge" in result.lower():
