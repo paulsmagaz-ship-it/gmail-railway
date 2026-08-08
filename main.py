@@ -419,6 +419,10 @@ def get_confirmation(activation_code: str) -> str:
             url = f"https://getcid.info/api/{iid}/{token}"
             resp = req.get(url, timeout=30)
             result = resp.text.strip()
+            # Cloudflare challenge — логуємо скорочено
+            if result.startswith("<!") or "Just a moment" in result or "challenge" in result.lower():
+                log.warning(f"  Getsid токен {i}: Cloudflare блокує запит з Railway IP")
+                return ""
             log.info(f"  Getsid токен {i} відповідь: {result}")
             # Якщо токен вичерпано — пробуємо наступний
             if any(err in result for err in ["Exceeded", "limit", "Token"]) and i < len(tokens):
